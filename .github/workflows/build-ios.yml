@@ -1,0 +1,91 @@
+name: Build iOS IPA (Unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Build configuration (Debug for dev testing, Release for production)"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Get pnpm store path
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Expo Prebuild (generate iOS project)
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Patch Podfile (disable code signing on pods)
+        working-directory: ios
+        run: ruby ../scripts/patch-podfile.rb
+
+      - name: Re-run pod install
+        working-directory: ios
+        run: pod install
+
+      - name: Build unsigned archive
+        working-directory: ios
+        run: |
+          xcodebuild clean archive \
+            -workspace CloudSea.xcworkspace \
+            -scheme CloudSea \
+            -configuration ${{ inputs.configuration }} \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -archivePath ../build/CloudSea.xcarchive
+
+      - name: Package IPA from archive
+        run: |
+          APP_PATH="build/CloudSea.xcarchive/Products/Applications/CloudSea.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: .app not found at $APP_PATH"
+            ls -R build/CloudSea.xcarchive/Products/ || true
+            exit 1
+          fi
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r CloudSea-unsigned.ipa Payload
+          rm -rf Payload
+          echo "IPA created: $(ls -lh CloudSea-unsigned.ipa)"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudSea-unsigned-ipa
+          path: CloudSea-unsigned.ipa
+          retention-days: 90
