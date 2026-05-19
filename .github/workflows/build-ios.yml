@@ -12,6 +12,9 @@ on:
           - Release
           - Debug
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-ios:
     runs-on: macos-15
