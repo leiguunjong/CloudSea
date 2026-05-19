@@ -4,25 +4,47 @@
 # See: https://github.com/expo/expo/issues/29526
 
 podfile = File.read("Podfile")
-lines = podfile.lines
 
-last_end = lines.rindex { |l| l.match?(/^end\s*$/) }
-unless last_end
-  puts "ERROR: Could not find closing 'end' in Podfile"
+# Locate the post_install block by finding "post_install do |installer|"
+# and tracking do/end nesting to find the matching closing end.
+lines = podfile.lines
+start_idx = lines.index { |l| l.match?(/^\s*post_install\s+do\s*\|/) }
+
+unless start_idx
+  puts "ERROR: post_install block not found in Podfile"
   exit 1
 end
 
-fix = [
-  "  # Disable code signing for unsigned IPA builds (patch-podfile.rb)\n",
-  "  installer.pods_project.targets.each do |target|\n",
-  "    target.build_configurations.each do |config|\n",
-  "      config.build_settings[\"EXPANDED_CODE_SIGN_IDENTITY\"] = \"\"\n",
-  "      config.build_settings[\"CODE_SIGNING_REQUIRED\"] = \"NO\"\n",
-  "      config.build_settings[\"CODE_SIGNING_ALLOWED\"] = \"NO\"\n",
-  "    end\n",
-  "  end\n",
-  "\n",
-]
-lines.insert(last_end, *fix)
+# Track do/end nesting to find the matching closing end
+depth = 0
+end_idx = nil
+lines[start_idx..].each_with_index do |line, offset|
+  depth += line.scan(/\bdo\b/).size
+  depth -= line.scan(/\bend\b/).size
+
+  if depth == 0 && offset > 0
+    end_idx = start_idx + offset
+    break
+  end
+end
+
+unless end_idx
+  puts "ERROR: could not find matching end for post_install"
+  exit 1
+end
+
+fix = <<~'FIX'
+
+  # Disable code signing for unsigned IPA builds
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ""
+      config.build_settings['CODE_SIGNING_REQUIRED'] = "NO"
+      config.build_settings['CODE_SIGNING_ALLOWED'] = "NO"
+    end
+  end
+FIX
+
+lines.insert(end_idx, fix)
 File.write("Podfile", lines.join)
-puts "Podfile patched successfully (code signing disabled for #{lines.size} lines)"
+puts "Podfile patched: inserted code signing fix at line #{end_idx + 1}"
