@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, View } from 'react-native';
@@ -10,6 +11,7 @@ import {
   Inter_400Regular,
   Inter_600SemiBold,
 } from '@expo-google-fonts/inter';
+import ExpoGaodeMapModule from 'expo-gaode-map';
 import { AuthProvider } from './contexts/AuthContext';
 
 export default function RootLayout() {
@@ -19,6 +21,17 @@ export default function RootLayout() {
     Inter_400Regular,
     Inter_600SemiBold,
   });
+
+  useEffect(() => {
+    ExpoGaodeMapModule.setPrivacyConfig({
+      hasShow: true,
+      hasContainsPrivacy: true,
+      hasAgree: true,
+    });
+    ExpoGaodeMapModule.initSDK({
+      iosKey: '971ccf3a9ff13270b637e3db4b9f6073',
+    });
+  }, []);
 
   if (!fontsLoaded) {
     return (
