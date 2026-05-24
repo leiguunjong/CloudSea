@@ -1,0 +1,57 @@
+diff --git a/ios/ExpoGaodeMapView.swift b/ios/ExpoGaodeMapView.swift
+index 21f6f4b83d034f1bbe2907c8df55ab508bcf9deb..d4caa50214f946cc6cacd0e30fb5f2f29b0e93ef 100644
+--- a/ios/ExpoGaodeMapView.swift
++++ b/ios/ExpoGaodeMapView.swift
+@@ -116,6 +116,10 @@ class ExpoGaodeMapView: ExpoView, MAMapViewDelegate, UIGestureRecognizerDelegate
+     
+     /// 缩放手势识别器（用于模拟惯性）
+     private var pinchGesture: UIPinchGestureRecognizer!
++    /// 单指双击拖动缩放手势识别器
++    private var oneFingerZoomGesture: UILongPressGestureRecognizer!
++    private var oneFingerZoomLastY: CGFloat = 0
++    private var oneFingerZoomStartZoom: Double = 0
+     
+     // 惯性动画相关属性
+     private var displayLink: CADisplayLink?
+@@ -880,14 +884,41 @@ class ExpoGaodeMapView: ExpoView, MAMapViewDelegate, UIGestureRecognizerDelegate
+         resolvedMapView.addGestureRecognizer(pinchGesture)
+         self.pinchGesture = pinchGesture
+         updatePinchGestureState()
++
++        let oneFingerZoomGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleOneFingerZoom(_:)))
++        oneFingerZoomGesture.numberOfTapsRequired = 1
++        oneFingerZoomGesture.minimumPressDuration = 0.15
++        oneFingerZoomGesture.allowableMovement = CGFloat.greatestFiniteMagnitude
++        oneFingerZoomGesture.delegate = self
++        resolvedMapView.addGestureRecognizer(oneFingerZoomGesture)
++        self.oneFingerZoomGesture = oneFingerZoomGesture
+     }
+ 
+     private func updatePinchGestureState() {
+         pinchGesture?.isEnabled = isZoomEnabled
++        oneFingerZoomGesture?.isEnabled = isZoomEnabled
+         if !isZoomEnabled {
+             stopInertiaAnimation()
+         }
+     }
++
++    @objc func handleOneFingerZoom(_ gesture: UILongPressGestureRecognizer) {
++        guard let mapView = mapView else { return }
++
++        switch gesture.state {
++        case .began:
++            oneFingerZoomLastY = gesture.location(in: mapView).y
++            oneFingerZoomStartZoom = mapView.zoomLevel
++        case .changed:
++            let currentY = gesture.location(in: mapView).y
++            let deltaY = oneFingerZoomLastY - currentY
++            let zoomDelta = Double(deltaY) * 0.015
++            let newZoom = max(mapView.minZoomLevel, min(mapView.maxZoomLevel, oneFingerZoomStartZoom + zoomDelta))
++            mapView.setZoomLevel(newZoom, animated: false)
++        default:
++            break
++        }
++    }
+ }
+ 
+ // MARK: - AppleMapDelegate

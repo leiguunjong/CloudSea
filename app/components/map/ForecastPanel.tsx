@@ -1,0 +1,401 @@
+import { useRef, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Animated,
+} from 'react-native';
+import type { MapMode, SlotForecast } from '../../types/map';
+import { GEMSTONE_COLORS } from '../../types/map';
+
+// --- Layout constants (pt, matching mockup px) ---
+const TOTAL_SLOTS = 73;
+const SLOTS_PER_DAY = 12;
+const LARGE_SIZE = 4;
+const SMALL_SIZE = 2;
+const GAP = 1;
+const BAR_MAX_HEIGHT = 16;
+const ROW_PADDING = 2;
+const TRACK_HEIGHT = 4;
+
+const PANEL_BOTTOM = 74;
+const PANEL_HEIGHT = 65;
+const PANEL_H_PADDING = 10;
+const PANEL_LEFT = 12;
+
+const BADGE_ABOVE = 6;
+const BADGE_HEIGHT = 18;
+
+const DAY_LABELS = ['-1', '今天', '+1', '+2', '+3', '+4', '+5'];
+
+// --- Props ---
+interface ForecastPanelProps {
+  mode: MapMode;
+  forecast: SlotForecast | null;
+  visible: boolean;
+  selectedIndex: number;
+  onSelectSlot: (index: number) => void;
+}
+
+// --- Compute slot center X within the 73-item row (inside panel) ---
+function getSlotCenterX(index: number): number {
+  const largeBefore = Math.ceil(index / SLOTS_PER_DAY);
+  const smallBefore = index - largeBefore;
+  const slotW = index % SLOTS_PER_DAY === 0 ? LARGE_SIZE : SMALL_SIZE;
+  return (
+    ROW_PADDING +
+    largeBefore * (LARGE_SIZE + GAP) +
+    smallBefore * (SMALL_SIZE + GAP) +
+    slotW / 2
+  );
+}
+
+// --- Color helpers ---
+function getBarColor(prob: number): string {
+  if (prob >= 90) return GEMSTONE_COLORS[5];
+  if (prob >= 75) return GEMSTONE_COLORS[4];
+  if (prob >= 55) return GEMSTONE_COLORS[3];
+  if (prob >= 30) return GEMSTONE_COLORS[2];
+  return GEMSTONE_COLORS[1];
+}
+
+// --- Pulse ring animated component ---
+function PulseRing() {
+  const anim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: 2000,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim]);
+
+  const scale = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [2.4, 0.8],
+  });
+  const opacity = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        top: -4,
+        left: -4,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        borderWidth: 1,
+        borderColor: 'rgba(196,170,69,0.6)',
+        transform: [{ scale }],
+        opacity,
+      }}
+    />
+  );
+}
+
+// --- Main component ---
+export default function ForecastPanel({
+  mode,
+  forecast,
+  visible,
+  selectedIndex,
+  onSelectSlot,
+}: ForecastPanelProps) {
+  const [badgeWidth, setBadgeWidth] = useState(80);
+
+  if (!visible || !forecast) return null;
+
+  const selectedCenterX = getSlotCenterX(selectedIndex);
+  const selectedSlot = forecast.slots[selectedIndex];
+  const panelTop = PANEL_BOTTOM + PANEL_HEIGHT;
+
+  // Badge position: centered on selected dot, 6pt above panel top
+  const badgeBottom = panelTop + BADGE_ABOVE + BADGE_HEIGHT;
+  // Screen X of selected dot center
+  const dotScreenX = PANEL_LEFT + PANEL_H_PADDING + selectedCenterX;
+
+  // Datetime: below panel, aligned with selected dot
+  const dtBottom = PANEL_BOTTOM - 8;
+
+  const renderBar = (i: number) => {
+    const isLarge = i % SLOTS_PER_DAY === 0;
+    const slot = i < 72 ? forecast.slots[i] : null;
+    const barH = slot ? (slot.cloudSeaProbability / 100) * BAR_MAX_HEIGHT : 0;
+    const color = slot ? getBarColor(slot.cloudSeaProbability) : 'transparent';
+    const glow = barH >= 14;
+
+    const bar = (
+      <View
+        style={{
+          width: SMALL_SIZE,
+          height: Math.max(0, barH),
+          backgroundColor: color,
+          borderTopLeftRadius: 1,
+          borderTopRightRadius: 1,
+          ...(glow
+            ? {
+                shadowColor: color,
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.5,
+                shadowRadius: 2,
+              }
+            : {}),
+        }}
+      />
+    );
+
+    if (isLarge) {
+      return (
+        <View
+          key={i}
+          style={{
+            width: LARGE_SIZE,
+            flexShrink: 0,
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+          }}
+        >
+          {bar}
+        </View>
+      );
+    }
+    return (
+      <View
+        key={i}
+        style={{ width: SMALL_SIZE, alignItems: 'center', justifyContent: 'flex-end' }}
+      >
+        {bar}
+      </View>
+    );
+  };
+
+  const renderDot = (i: number) => {
+    const isLarge = i % SLOTS_PER_DAY === 0;
+    const isSelected = i === selectedIndex;
+    const size = isLarge ? LARGE_SIZE : SMALL_SIZE;
+    const borderRadius = isLarge ? 1 : size / 2;
+
+    return (
+      <TouchableOpacity
+        key={i}
+        activeOpacity={0.7}
+        onPress={() => onSelectSlot(i)}
+        style={{
+          width: size,
+          height: size,
+          borderRadius,
+          flexShrink: isLarge ? 0 : 1,
+          backgroundColor: isSelected
+            ? '#c4aa45'
+            : isLarge
+              ? 'rgba(255,255,255,0.20)'
+              : 'rgba(255,255,255,0.10)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {isSelected && <PulseRing />}
+      </TouchableOpacity>
+    );
+  };
+
+  const renderLabel = (i: number) => {
+    const isLarge = i % SLOTS_PER_DAY === 0;
+    const dayIdx = i / SLOTS_PER_DAY;
+    return (
+      <View
+        key={i}
+        style={{
+          width: isLarge ? LARGE_SIZE : SMALL_SIZE,
+          flexShrink: isLarge ? 0 : 1,
+          overflow: 'visible' as const,
+        }}
+      >
+        {isLarge && dayIdx < DAY_LABELS.length && (
+          <Text style={styles.labelText} numberOfLines={1}>
+            {DAY_LABELS[dayIdx]}
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <>
+      {/* Part 1: Cloud-sea level badge — centered on selected dot, above panel */}
+      {selectedSlot && (
+        <View
+          style={[
+            styles.badge,
+            {
+              bottom: badgeBottom,
+              left: dotScreenX - badgeWidth / 2,
+            },
+          ]}
+          onLayout={(e) => {
+            const w = e.nativeEvent.layout.width;
+            if (w > 0) setBadgeWidth(w);
+          }}
+        >
+          <Text style={styles.badgeProb}>
+            {selectedSlot.cloudSeaProbability}%
+          </Text>
+          <Text style={styles.badgeMode}>
+            {mode === 'cloudsea' ? '云海' : '天气'}
+          </Text>
+          <Text style={styles.badgeLevel}>
+            {selectedSlot.cloudSeaLevelName}
+          </Text>
+        </View>
+      )}
+
+      {/* Part 2: Date/time — below selected dot */}
+      {selectedSlot && (
+        <Text
+          style={[
+            styles.dateTime,
+            {
+              bottom: dtBottom,
+              left: dotScreenX - 24,
+            },
+          ]}
+        >
+          {selectedSlot.date} {String(selectedSlot.hour).padStart(2, '0')}:00
+        </Text>
+      )}
+
+      {/* Panel body */}
+      <View style={styles.panel}>
+        {/* Bar chart */}
+        <View style={styles.barChartRow}>
+          {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderBar(i))}
+        </View>
+
+        {/* Time track */}
+        <View style={styles.trackContainer}>
+          <View style={styles.baseline} />
+          <View style={styles.dotsRow}>
+            {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderDot(i))}
+          </View>
+        </View>
+
+        {/* Day labels */}
+        <View style={styles.labelsRow}>
+          {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderLabel(i))}
+        </View>
+      </View>
+    </>
+  );
+}
+
+// --- Styles ---
+const styles = StyleSheet.create({
+  // --- Floating badge (Part 1) ---
+  badge: {
+    position: 'absolute',
+    height: BADGE_HEIGHT,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    zIndex: 15,
+  },
+  badgeProb: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  badgeMode: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 9,
+    fontFamily: 'Inter_400Regular',
+  },
+  badgeLevel: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 9,
+    fontFamily: 'Inter_400Regular',
+  },
+
+  // --- Floating date/time (Part 2) ---
+  dateTime: {
+    position: 'absolute',
+    fontSize: 7,
+    fontFamily: 'Inter_400Regular',
+    color: 'rgba(255,255,255,0.15)',
+    zIndex: 15,
+  },
+
+  // --- Panel ---
+  panel: {
+    position: 'absolute',
+    bottom: PANEL_BOTTOM,
+    left: PANEL_LEFT,
+    right: 12,
+    height: PANEL_HEIGHT,
+    backgroundColor: 'rgba(10,20,30,0.78)',
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(189,170,110,0.08)',
+    paddingTop: 8,
+    paddingBottom: 6,
+    paddingHorizontal: PANEL_H_PADDING,
+    zIndex: 11,
+  },
+
+  // --- Bar chart ---
+  barChartRow: {
+    flexDirection: 'row',
+    gap: GAP,
+    alignItems: 'flex-end',
+    height: BAR_MAX_HEIGHT,
+    marginBottom: 2,
+    paddingHorizontal: ROW_PADDING,
+  },
+
+  // --- Time track ---
+  trackContainer: {
+    height: TRACK_HEIGHT,
+    justifyContent: 'center',
+  },
+  baseline: {
+    position: 'absolute',
+    top: TRACK_HEIGHT / 2,
+    left: 4,
+    right: 4,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    gap: GAP,
+    alignItems: 'center',
+    paddingHorizontal: ROW_PADDING,
+  },
+
+  // --- Day labels ---
+  labelsRow: {
+    flexDirection: 'row',
+    gap: GAP,
+    marginTop: 2,
+    paddingHorizontal: ROW_PADDING,
+  },
+  labelText: {
+    fontSize: 7,
+    fontFamily: 'Inter_400Regular',
+    color: 'rgba(255,255,255,0.15)',
+  },
+});
