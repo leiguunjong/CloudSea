@@ -1,20 +1,18 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Animated,
+  useWindowDimensions,
 } from 'react-native';
 import type { MapMode, SlotForecast } from '../../types/map';
 import { GEMSTONE_COLORS } from '../../types/map';
 
-// --- Layout constants (pt, matching mockup px) ---
+// --- Fixed layout constants ---
 const TOTAL_SLOTS = 73;
 const SLOTS_PER_DAY = 12;
-const LARGE_SIZE = 4;
-const SMALL_SIZE = 2;
-const GAP = 1;
 const BAR_MAX_HEIGHT = 16;
 const ROW_PADDING = 2;
 const TRACK_HEIGHT = 4;
@@ -29,6 +27,9 @@ const BADGE_HEIGHT = 18;
 
 const DAY_LABELS = ['-1', '今天', '+1', '+2', '+3', '+4', '+5'];
 
+// 232 base units: 7 large × 4 + 66 small × 2 + 72 gaps × 1
+const TOTAL_BASE_UNITS = 232;
+
 // --- Props ---
 interface ForecastPanelProps {
   mode: MapMode;
@@ -36,19 +37,6 @@ interface ForecastPanelProps {
   visible: boolean;
   selectedIndex: number;
   onSelectSlot: (index: number) => void;
-}
-
-// --- Compute slot center X within the 73-item row (inside panel) ---
-function getSlotCenterX(index: number): number {
-  const largeBefore = Math.ceil(index / SLOTS_PER_DAY);
-  const smallBefore = index - largeBefore;
-  const slotW = index % SLOTS_PER_DAY === 0 ? LARGE_SIZE : SMALL_SIZE;
-  return (
-    ROW_PADDING +
-    largeBefore * (LARGE_SIZE + GAP) +
-    smallBefore * (SMALL_SIZE + GAP) +
-    slotW / 2
-  );
 }
 
 // --- Color helpers ---
@@ -112,6 +100,34 @@ export default function ForecastPanel({
   onSelectSlot,
 }: ForecastPanelProps) {
   const [badgeWidth, setBadgeWidth] = useState(80);
+  const [panelWidth, setPanelWidth] = useState(0);
+  const { width: screenWidth } = useWindowDimensions();
+
+  // Default panel width: screen minus left/right margins
+  const initialPanelWidth = screenWidth - PANEL_LEFT - 12;
+
+  // Compute dynamic sizes from actual panel width
+  const { gap, small, large, getSlotCenterX } = useMemo(() => {
+    const w = panelWidth > 0 ? panelWidth : initialPanelWidth;
+    const available = w - 2 * PANEL_H_PADDING - 2 * ROW_PADDING;
+    const g = available / TOTAL_BASE_UNITS;
+    return {
+      gap: g,
+      small: 2 * g,
+      large: 4 * g,
+      getSlotCenterX: (index: number) => {
+        const largeBefore = Math.ceil(index / SLOTS_PER_DAY);
+        const smallBefore = index - largeBefore;
+        const slotW = index % SLOTS_PER_DAY === 0 ? 4 * g : 2 * g;
+        return (
+          ROW_PADDING +
+          largeBefore * (4 * g + g) +
+          smallBefore * (2 * g + g) +
+          slotW / 2
+        );
+      },
+    };
+  }, [panelWidth, initialPanelWidth]);
 
   if (!visible || !forecast) return null;
 
@@ -137,7 +153,7 @@ export default function ForecastPanel({
     const bar = (
       <View
         style={{
-          width: SMALL_SIZE,
+          width: small,
           height: Math.max(0, barH),
           backgroundColor: color,
           borderTopLeftRadius: 1,
@@ -159,7 +175,7 @@ export default function ForecastPanel({
         <View
           key={i}
           style={{
-            width: LARGE_SIZE,
+            width: large,
             flexShrink: 0,
             alignItems: 'center',
             justifyContent: 'flex-end',
@@ -172,7 +188,7 @@ export default function ForecastPanel({
     return (
       <View
         key={i}
-        style={{ width: SMALL_SIZE, alignItems: 'center', justifyContent: 'flex-end' }}
+        style={{ width: small, alignItems: 'center', justifyContent: 'flex-end' }}
       >
         {bar}
       </View>
@@ -182,8 +198,8 @@ export default function ForecastPanel({
   const renderDot = (i: number) => {
     const isLarge = i % SLOTS_PER_DAY === 0;
     const isSelected = i === selectedIndex;
-    const size = isLarge ? LARGE_SIZE : SMALL_SIZE;
-    const borderRadius = isLarge ? 1 : size / 2;
+    const size = isLarge ? large : small;
+    const borderRadius = isLarge ? size / 4 : size / 2;
 
     return (
       <TouchableOpacity
@@ -216,7 +232,7 @@ export default function ForecastPanel({
       <View
         key={i}
         style={{
-          width: isLarge ? LARGE_SIZE : SMALL_SIZE,
+          width: isLarge ? large : small,
           flexShrink: isLarge ? 0 : 1,
           overflow: 'visible' as const,
         }}
@@ -232,7 +248,7 @@ export default function ForecastPanel({
 
   return (
     <>
-      {/* Part 1: Cloud-sea level badge — centered on selected dot, above panel */}
+      {/* Part 1: Cloud-sea level badge */}
       {selectedSlot && (
         <View
           style={[
@@ -259,7 +275,7 @@ export default function ForecastPanel({
         </View>
       )}
 
-      {/* Part 2: Date/time — below selected dot */}
+      {/* Part 2: Date/time */}
       {selectedSlot && (
         <Text
           style={[
@@ -275,22 +291,25 @@ export default function ForecastPanel({
       )}
 
       {/* Panel body */}
-      <View style={styles.panel}>
+      <View
+        style={styles.panel}
+        onLayout={(e) => setPanelWidth(e.nativeEvent.layout.width)}
+      >
         {/* Bar chart */}
-        <View style={styles.barChartRow}>
+        <View style={[styles.barChartRow, { gap }]}>
           {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderBar(i))}
         </View>
 
         {/* Time track */}
         <View style={styles.trackContainer}>
           <View style={styles.baseline} />
-          <View style={styles.dotsRow}>
+          <View style={[styles.dotsRow, { gap }]}>
             {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderDot(i))}
           </View>
         </View>
 
         {/* Day labels */}
-        <View style={styles.labelsRow}>
+        <View style={[styles.labelsRow, { gap }]}>
           {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderLabel(i))}
         </View>
       </View>
@@ -300,7 +319,6 @@ export default function ForecastPanel({
 
 // --- Styles ---
 const styles = StyleSheet.create({
-  // --- Floating badge (Part 1) ---
   badge: {
     position: 'absolute',
     height: BADGE_HEIGHT,
@@ -330,7 +348,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
   },
 
-  // --- Floating date/time (Part 2) ---
   dateTime: {
     position: 'absolute',
     fontSize: 7,
@@ -339,7 +356,6 @@ const styles = StyleSheet.create({
     zIndex: 15,
   },
 
-  // --- Panel ---
   panel: {
     position: 'absolute',
     bottom: PANEL_BOTTOM,
@@ -356,17 +372,14 @@ const styles = StyleSheet.create({
     zIndex: 11,
   },
 
-  // --- Bar chart ---
   barChartRow: {
     flexDirection: 'row',
-    gap: GAP,
     alignItems: 'flex-end',
     height: BAR_MAX_HEIGHT,
     marginBottom: 2,
     paddingHorizontal: ROW_PADDING,
   },
 
-  // --- Time track ---
   trackContainer: {
     height: TRACK_HEIGHT,
     justifyContent: 'center',
@@ -381,15 +394,12 @@ const styles = StyleSheet.create({
   },
   dotsRow: {
     flexDirection: 'row',
-    gap: GAP,
     alignItems: 'center',
     paddingHorizontal: ROW_PADDING,
   },
 
-  // --- Day labels ---
   labelsRow: {
     flexDirection: 'row',
-    gap: GAP,
     marginTop: 2,
     paddingHorizontal: ROW_PADDING,
   },
