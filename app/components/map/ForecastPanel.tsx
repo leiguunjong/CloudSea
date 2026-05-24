@@ -13,12 +13,10 @@ import { GEMSTONE_COLORS } from '../../types/map';
 // --- Fixed layout constants ---
 const TOTAL_SLOTS = 73;
 const SLOTS_PER_DAY = 12;
-const BAR_MAX_HEIGHT = 16;
 const ROW_PADDING = 2;
 const TRACK_HEIGHT = 4;
 
 const PANEL_BOTTOM = 74;
-const PANEL_HEIGHT = 65;
 const PANEL_H_PADDING = 10;
 const PANEL_LEFT = 12;
 
@@ -101,7 +99,10 @@ export default function ForecastPanel({
 }: ForecastPanelProps) {
   const [badgeWidth, setBadgeWidth] = useState(80);
   const [panelWidth, setPanelWidth] = useState(0);
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+
+  const panelHeight = screenHeight / 6;
+  const barMaxHeight = panelHeight / 4;
 
   // Default panel width: screen minus left/right margins
   const initialPanelWidth = screenWidth - PANEL_LEFT - 12;
@@ -133,7 +134,7 @@ export default function ForecastPanel({
 
   const selectedCenterX = getSlotCenterX(selectedIndex);
   const selectedSlot = forecast.slots[selectedIndex];
-  const panelTop = PANEL_BOTTOM + PANEL_HEIGHT;
+  const panelTop = PANEL_BOTTOM + panelHeight;
 
   // Badge position: centered on selected dot, 6pt above panel top
   const badgeBottom = panelTop + BADGE_ABOVE + BADGE_HEIGHT;
@@ -146,9 +147,9 @@ export default function ForecastPanel({
   const renderBar = (i: number) => {
     const isLarge = i % SLOTS_PER_DAY === 0;
     const slot = i < 72 ? forecast.slots[i] : null;
-    const barH = slot ? (slot.cloudSeaProbability / 100) * BAR_MAX_HEIGHT : 0;
+    const barH = slot ? (slot.cloudSeaProbability / 100) * barMaxHeight : 0;
     const color = slot ? getBarColor(slot.cloudSeaProbability) : 'transparent';
-    const glow = barH >= 14;
+    const glow = barH >= barMaxHeight * 0.85;
 
     const bar = (
       <View
@@ -292,11 +293,11 @@ export default function ForecastPanel({
 
       {/* Panel body */}
       <View
-        style={styles.panel}
+        style={[styles.panel, { height: panelHeight }]}
         onLayout={(e) => setPanelWidth(e.nativeEvent.layout.width)}
       >
         {/* Bar chart */}
-        <View style={[styles.barChartRow, { gap }]}>
+        <View style={[styles.barChartRow, { gap, height: barMaxHeight }]}>
           {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderBar(i))}
         </View>
 
@@ -361,7 +362,6 @@ const styles = StyleSheet.create({
     bottom: PANEL_BOTTOM,
     left: PANEL_LEFT,
     right: 12,
-    height: PANEL_HEIGHT,
     backgroundColor: 'rgba(10,20,30,0.78)',
     borderRadius: 7,
     borderWidth: 1,
@@ -375,7 +375,6 @@ const styles = StyleSheet.create({
   barChartRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    height: BAR_MAX_HEIGHT,
     marginBottom: 2,
     paddingHorizontal: ROW_PADDING,
   },
