@@ -101,7 +101,7 @@ export default function ForecastPanel({
   const [panelWidth, setPanelWidth] = useState(0);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
 
-  const panelHeight = screenHeight / 6;
+  const panelHeight = screenHeight / 9;
   const barMaxHeight = panelHeight / 4;
 
   // Default panel width: screen minus left/right margins
