@@ -25,8 +25,21 @@ const BADGE_HEIGHT = 18;
 
 const DAY_LABELS = ['-1', '今天', '+1', '+2', '+3', '+4', '+5'];
 
-// 232 base units: 7 large × 4 + 66 small × 2 + 72 gaps × 1
-const TOTAL_BASE_UNITS = 232;
+// Base units (fixed-ratio grid):
+//   7 large items × 4 = 28
+//   66 small items × 2 = 132
+//   6 large→small gaps × 1 = 6
+//   6 small→large gaps × 1 = 6
+//   60 small→small gaps × 2 = 120
+//   2 × ROW_PADDING = 4
+//   Total = 296
+const TOTAL_BASE_UNITS = 296;
+
+// Gap multiplier by adjacent-pair type
+function gapForPair(prevIsLarge: boolean, nextIsLarge: boolean): number {
+  if (prevIsLarge || nextIsLarge) return 1; // L→S or S→L
+  return 2; // S→S
+}
 
 // --- Props ---
 interface ForecastPanelProps {
@@ -104,31 +117,44 @@ export default function ForecastPanel({
   const panelHeight = screenHeight / 9;
   const barMaxHeight = panelHeight / 4;
 
-  // Default panel width: screen minus left/right margins
   const initialPanelWidth = screenWidth - PANEL_LEFT - 12;
 
+  // Precompute per-index: isLarge, item width, gap to next
+  const slotMeta = useMemo(() => {
+    return Array.from({ length: TOTAL_SLOTS }, (_, i) => {
+      const isLarge = i % SLOTS_PER_DAY === 0;
+      const nextIsLarge = (i + 1) % SLOTS_PER_DAY === 0;
+      return { isLarge, itemW: isLarge ? 4 : 2, gapToNext: i < 72 ? gapForPair(isLarge, nextIsLarge) : 0 };
+    });
+  }, []);
+
   // Compute dynamic sizes from actual panel width
-  const { gap, small, large, getSlotCenterX } = useMemo(() => {
+  const { unit, large, small, slotStarts } = useMemo(() => {
     const w = panelWidth > 0 ? panelWidth : initialPanelWidth;
-    const available = w - 2 * PANEL_H_PADDING - 2 * ROW_PADDING;
-    const g = available / TOTAL_BASE_UNITS;
+    const available = w - 2 * PANEL_H_PADDING;
+    const u = available / TOTAL_BASE_UNITS;
+
+    // Precompute slot start positions (relative to row content, before ROW_PADDING)
+    const starts: number[] = [];
+    let pos = 0;
+    for (let i = 0; i < TOTAL_SLOTS; i++) {
+      starts.push(pos);
+      const meta = slotMeta[i];
+      pos += meta.itemW * u + meta.gapToNext * u;
+    }
+
     return {
-      gap: g,
-      small: 2 * g,
-      large: 4 * g,
-      getSlotCenterX: (index: number) => {
-        const largeBefore = Math.ceil(index / SLOTS_PER_DAY);
-        const smallBefore = index - largeBefore;
-        const slotW = index % SLOTS_PER_DAY === 0 ? 4 * g : 2 * g;
-        return (
-          ROW_PADDING +
-          largeBefore * (4 * g + g) +
-          smallBefore * (2 * g + g) +
-          slotW / 2
-        );
-      },
+      unit: u,
+      large: 4 * u,
+      small: 2 * u,
+      slotStarts: starts,
     };
-  }, [panelWidth, initialPanelWidth]);
+  }, [panelWidth, initialPanelWidth, slotMeta]);
+
+  // getSlotCenterX inside the panel coordinate system (relative to panel left edge)
+  const getSlotCenterX = (index: number) => {
+    return PANEL_H_PADDING + ROW_PADDING * unit + slotStarts[index] + (slotMeta[index].isLarge ? large : small) / 2;
+  };
 
   if (!visible || !forecast) return null;
 
@@ -136,71 +162,57 @@ export default function ForecastPanel({
   const selectedSlot = forecast.slots[selectedIndex];
   const panelTop = PANEL_BOTTOM + panelHeight;
 
-  // Badge position: centered on selected dot, 6pt above panel top
   const badgeBottom = panelTop + BADGE_ABOVE + BADGE_HEIGHT;
-  // Screen X of selected dot center
-  const dotScreenX = PANEL_LEFT + PANEL_H_PADDING + selectedCenterX;
+  const dotScreenX = PANEL_LEFT + PANEL_H_PADDING + ROW_PADDING * unit + slotStarts[selectedIndex] + (slotMeta[selectedIndex].isLarge ? large : small) / 2;
 
-  // Datetime: below panel, aligned with selected dot
   const dtBottom = PANEL_BOTTOM - 8;
 
   const renderBar = (i: number) => {
-    const isLarge = i % SLOTS_PER_DAY === 0;
+    const meta = slotMeta[i];
     const slot = i < 72 ? forecast.slots[i] : null;
     const barH = slot ? (slot.cloudSeaProbability / 100) * barMaxHeight : 0;
     const color = slot ? getBarColor(slot.cloudSeaProbability) : 'transparent';
     const glow = barH >= barMaxHeight * 0.85;
+    const gapRight = meta.gapToNext * unit;
 
-    const bar = (
-      <View
-        style={{
-          width: small,
-          height: Math.max(0, barH),
-          backgroundColor: color,
-          borderTopLeftRadius: 1,
-          borderTopRightRadius: 1,
-          ...(glow
-            ? {
-                shadowColor: color,
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.5,
-                shadowRadius: 2,
-              }
-            : {}),
-        }}
-      />
-    );
-
-    if (isLarge) {
-      return (
-        <View
-          key={i}
-          style={{
-            width: large,
-            flexShrink: 0,
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-          }}
-        >
-          {bar}
-        </View>
-      );
-    }
     return (
       <View
         key={i}
-        style={{ width: small, alignItems: 'center', justifyContent: 'flex-end' }}
+        style={{
+          width: meta.isLarge ? large : small,
+          flexShrink: meta.isLarge ? 0 : 1,
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          marginRight: gapRight,
+        }}
       >
-        {bar}
+        <View
+          style={{
+            width: small,
+            height: Math.max(0, barH),
+            backgroundColor: color,
+            borderTopLeftRadius: 1,
+            borderTopRightRadius: 1,
+            ...(glow
+              ? {
+                  shadowColor: color,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.5,
+                  shadowRadius: 2,
+                }
+              : {}),
+          }}
+        />
       </View>
     );
   };
 
   const renderDot = (i: number) => {
-    const isLarge = i % SLOTS_PER_DAY === 0;
+    const meta = slotMeta[i];
     const isSelected = i === selectedIndex;
-    const size = isLarge ? large : small;
-    const borderRadius = isLarge ? size / 4 : size / 2;
+    const size = meta.isLarge ? large : small;
+    const borderRadius = meta.isLarge ? size / 4 : size / 2;
+    const gapRight = meta.gapToNext * unit;
 
     return (
       <TouchableOpacity
@@ -211,10 +223,11 @@ export default function ForecastPanel({
           width: size,
           height: size,
           borderRadius,
-          flexShrink: isLarge ? 0 : 1,
+          flexShrink: meta.isLarge ? 0 : 1,
+          marginRight: gapRight,
           backgroundColor: isSelected
             ? '#c4aa45'
-            : isLarge
+            : meta.isLarge
               ? 'rgba(255,255,255,0.20)'
               : 'rgba(255,255,255,0.10)',
           alignItems: 'center',
@@ -227,18 +240,21 @@ export default function ForecastPanel({
   };
 
   const renderLabel = (i: number) => {
-    const isLarge = i % SLOTS_PER_DAY === 0;
+    const meta = slotMeta[i];
     const dayIdx = i / SLOTS_PER_DAY;
+    const gapRight = meta.gapToNext * unit;
+
     return (
       <View
         key={i}
         style={{
-          width: isLarge ? large : small,
-          flexShrink: isLarge ? 0 : 1,
+          width: meta.isLarge ? large : small,
+          flexShrink: meta.isLarge ? 0 : 1,
+          marginRight: gapRight,
           overflow: 'visible' as const,
         }}
       >
-        {isLarge && dayIdx < DAY_LABELS.length && (
+        {meta.isLarge && dayIdx < DAY_LABELS.length && (
           <Text style={styles.labelText} numberOfLines={1}>
             {DAY_LABELS[dayIdx]}
           </Text>
@@ -249,7 +265,6 @@ export default function ForecastPanel({
 
   return (
     <>
-      {/* Part 1: Cloud-sea level badge */}
       {selectedSlot && (
         <View
           style={[
@@ -276,7 +291,6 @@ export default function ForecastPanel({
         </View>
       )}
 
-      {/* Part 2: Date/time */}
       {selectedSlot && (
         <Text
           style={[
@@ -291,26 +305,25 @@ export default function ForecastPanel({
         </Text>
       )}
 
-      {/* Panel body */}
       <View
         style={[styles.panel, { height: panelHeight }]}
         onLayout={(e) => setPanelWidth(e.nativeEvent.layout.width)}
       >
         {/* Bar chart */}
-        <View style={[styles.barChartRow, { gap, height: barMaxHeight }]}>
+        <View style={[styles.barChartRow, { height: barMaxHeight, paddingHorizontal: ROW_PADDING * unit }]}>
           {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderBar(i))}
         </View>
 
         {/* Time track */}
         <View style={styles.trackContainer}>
           <View style={styles.baseline} />
-          <View style={[styles.dotsRow, { gap }]}>
+          <View style={[styles.dotsRow, { paddingHorizontal: ROW_PADDING * unit }]}>
             {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderDot(i))}
           </View>
         </View>
 
         {/* Day labels */}
-        <View style={[styles.labelsRow, { gap }]}>
+        <View style={[styles.labelsRow, { paddingHorizontal: ROW_PADDING * unit }]}>
           {Array.from({ length: TOTAL_SLOTS }).map((_, i) => renderLabel(i))}
         </View>
       </View>
@@ -376,7 +389,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     marginBottom: 2,
-    paddingHorizontal: ROW_PADDING,
   },
 
   trackContainer: {
@@ -394,13 +406,11 @@ const styles = StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: ROW_PADDING,
   },
 
   labelsRow: {
     flexDirection: 'row',
     marginTop: 2,
-    paddingHorizontal: ROW_PADDING,
   },
   labelText: {
     fontSize: 7,
